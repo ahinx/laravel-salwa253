@@ -84,111 +84,263 @@ class ProductController extends Controller
     }
 
 
-    /**
-     * Store a newly created resource in storage.
-     */
-    // Menyimpan produk baru
-    public function store(Request $request)
+    public function store1(Request $request)
     {
-        // Log untuk memeriksa data yang diterima
+        // Log data request
         Log::info('Request Data:', $request->all());
 
-        // Validasi input
+        // Pastikan method ini selalu return JSON
+        // TIPS: Biasakan bungkus di try-catch untuk handle error tak terduga
+        try {
+            // Validasi
+            $request->validate([
+                'product_name'      => 'required|string|max:255',
+                'cost_price'        => 'required|numeric',
+                'wholesale_price'   => 'required|numeric',
+                'sale_price'        => 'required|numeric',
+                'supplier_id'       => 'required|exists:suppliers,id',
+                'colors'            => 'array',
+                'sizes'             => 'array',
+                'photos'            => 'array',
+                'photos.*'          => 'image|mimes:jpeg,png,jpg,gif,svg|max:10120',
+                'stock'             => 'required|integer|min:0',
+                'brand_id'          => 'required|exists:brands,id',
+                'category_id'       => 'required|exists:categories,id',
+                'coop_id'           => 'required|exists:coops,id',
+            ]);
 
-        $request->validate([
-            'product_name'      => 'required|string|max:255',
-            'cost_price'        => 'required|numeric',
-            'wholesale_price'   => 'required|numeric',
-            'sale_price'        => 'required|numeric',
-            'supplier_id'       => 'required|exists:suppliers,id',
-            'colors'            => 'array',
-            'sizes'             => 'array',
-            'photos'            => 'array',
-            'photos.*'          => 'image|mimes:jpeg,png,jpg,gif,svg|max:5120',
-            'stock'             => 'required|integer|min:0',
-            'brand_id'          => 'required|exists:brands,id',
-            'category_id'       => 'required|exists:categories,id',
-            'coop_id'           => 'required|exists:coops,id',
-        ]);
+            // Cek setting prefix
+            $startCode = DB::table('settings')->where('key', 'item_code_start')->value('value');
+            if (is_null($startCode) || trim($startCode) === '') {
+                return response()->json([
+                    'status'  => 'error',
+                    'message' => 'Isi dulu awalan kode item pada menu setting.',
+                ], 422); // 422: Unprocessable Entity
+            }
 
-        // Ambil kode awal dari tabel settings
-        $startCode = DB::table('settings')->where('key', 'item_code_start')->value('value');
+            // Gunakan DB Transaction agar kalau ada error, seluruh proses di-rollback
+            $product = DB::transaction(function () use ($request, $startCode) {
 
-        if (is_null($startCode) || trim($startCode) === '') {
+                // Contoh: Panjang digit prefix
+                $codeLength = strlen($startCode);
+
+                // Lock table atau minimal lock row terakhir agar terhindar dari race condition
+                // (opsional, tergantung skenario concurrency di project Anda)
+                $lastProduct = Product::latest('item_code')
+                    ->lockForUpdate()  // <-- "SELECT FOR UPDATE"
+                    ->first();
+
+                if ($lastProduct) {
+                    // Ambil angka terakhir dari item_code
+                    $lastCode = (int) substr($lastProduct->item_code, -$codeLength);
+                    // Tambah 1
+                    $newNumber = $lastCode + 1;
+                    // Generate item_code baru
+                    $itemCode = str_pad($newNumber, $codeLength, '0', STR_PAD_LEFT);
+                } else {
+                    // Jika belum ada produk
+                    $itemCode = str_pad($startCode, $codeLength, '0', STR_PAD_LEFT);
+                }
+
+                // Buat instance product
+                $product = Product::create([
+                    'product_name'      => $request->product_name,
+                    'cost_price'        => $request->cost_price,
+                    'wholesale_price'   => $request->wholesale_price,
+                    'sale_price'        => $request->sale_price,
+                    'supplier_id'       => $request->supplier_id,
+                    'item_code'         => $itemCode,
+                    'stock'             => $request->stock,
+                    'brand_id'          => $request->brand_id,
+                    'category_id'       => $request->category_id,
+                    'coop_id'           => $request->coop_id,
+                ]);
+
+                // Relasi many-to-many
+                if ($request->colors) {
+                    $product->colors()->sync($request->colors);
+                }
+                if ($request->sizes) {
+                    $product->sizes()->sync($request->sizes);
+                }
+
+                // Upload foto (jika ada)
+                if ($request->hasFile('photos')) {
+                    foreach ($request->file('photos') as $file) {
+                        $path = $file->store('product_photos', 'public');
+                        // Simpan ke tabel product_photos (jika Anda punya model relasi)
+                        $product->photos()->create([
+                            'photo_path' => $path
+                        ]);
+                    }
+                }
+
+                return $product;
+            }); // end transaction
+
+            Log::info('Product Created:', ['Product ID' => $product->id]);
+
+            return response()->json([
+                'status'  => 'success',
+                'message' => 'Product created successfully',
+                'data'    => $product
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            // Jika validasi gagal, kembalikan JSON 422
+            $errors = $e->errors();
             return response()->json([
                 'status'  => 'error',
-                'message' => 'Isi dulu awalan kode item pada menu setting.',
-            ], 422); // HTTP 422: Unprocessable Entity
+                'message' => 'Validation error',
+                'errors'  => $errors
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Error creating product: ' . $e->getMessage());
+
+            // Jika error selain validasi
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Terjadi kesalahan saat menyimpan produk: ' . $e->getMessage()
+            ], 500);
         }
+    }
 
-        // Log untuk memeriksa data yang diterima
-        // Log::info('Request Data:', $request->all());
+    public function store(Request $request)
+    {
+        // Log data request untuk debugging
+        Log::info('Request Data:', $request->all());
 
-        // Dapatkan panjang digit dari kode awal
-        $codeLength = strlen($startCode);
+        try {
 
-        // Ambil produk terakhir berdasarkan item_code
-        $lastProduct = Product::latest('item_code')->first();
+            Log::info('Validating request data.');
 
-        if ($lastProduct) {
-            // Ambil angka terakhir dari item_code
-            $lastCode = (int) substr($lastProduct->item_code, -$codeLength);
+            // Validasi input
+            $request->validate([
+                'product_name'    => 'required|string|max:255',
+                'cost_price'      => 'required|numeric',
+                'wholesale_price' => 'required|numeric',
+                'sale_price'      => 'required|numeric',
+                'supplier_id'     => 'required|exists:suppliers,id',
+                'colors'          => 'array',
+                'sizes'           => 'array',
+                'photos'          => 'array',
+                'photos.*'        => 'image|mimes:jpeg,png,jpg,gif,svg|max:10240', // Max 10MB
+                'stock'           => 'required|integer|min:0',
+                'brand_id'        => 'required|exists:brands,id',
+                'category_id'     => 'required|exists:categories,id',
+                'coop_id'         => 'required|exists:coops,id',
+            ]);
 
-            // Tambahkan 1 untuk item_code berikutnya
-            $itemCode = str_pad($lastCode + 1, $codeLength, '0', STR_PAD_LEFT);
-        } else {
-            // Jika belum ada produk, gunakan kode awal dari settings
-            $itemCode = str_pad($startCode, $codeLength, '0', STR_PAD_LEFT);
-        }
 
-        // Simpan foto
-        $photoPaths = [];
-        if ($request->hasFile('photos')) {
-            foreach ($request->file('photos') as $photo) {
-                $path = $photo->store('product_photos', 'public');
-                $photoPaths[] = $path;
+
+            // Ambil kode awal dari tabel settings
+            Log::info('Checking item_code_start setting.');
+            $startCode = DB::table('settings')->where('key', 'item_code_start')->value('value');
+
+            if (is_null($startCode) || trim($startCode) === '') {
+                return response()->json([
+                    'status'  => 'error',
+                    'message' => 'Isi dulu awalan kode item pada menu setting.',
+                ], 422); // HTTP 422: Unprocessable Entity
             }
+
+            // Gunakan DB Transaction agar proses atomic
+            Log::info('Starting DB transaction.');
+            $product = DB::transaction(function () use ($request, $startCode) {
+                // Dapatkan panjang digit dari kode awal
+                Log::info('Generating item_code.');
+                $codeLength = strlen($startCode);
+
+                // Ambil produk terakhir dengan lock untuk mencegah race condition
+                $lastProduct = Product::latest('item_code')->lockForUpdate()->first();
+
+                if ($lastProduct) {
+                    // Ambil angka terakhir dari item_code
+                    $lastCode = (int) substr($lastProduct->item_code, -$codeLength);
+                    // Tambah 1
+                    $newNumber = $lastCode + 1;
+                    // Generate item_code baru
+                    $itemCode = str_pad($newNumber, $codeLength, '0', STR_PAD_LEFT);
+                } else {
+                    // Jika belum ada produk, gunakan kode awal dari settings
+                    $itemCode = str_pad($startCode, $codeLength, '0', STR_PAD_LEFT);
+                }
+
+                // Buat instance product
+                $product = Product::create([
+                    'product_name'    => $request->product_name,
+                    'cost_price'      => $request->cost_price,
+                    'wholesale_price' => $request->wholesale_price,
+                    'sale_price'      => $request->sale_price,
+                    'supplier_id'     => $request->supplier_id,
+                    'item_code'       => $itemCode,
+                    'stock'           => $request->stock,
+                    'brand_id'        => $request->brand_id,
+                    'category_id'     => $request->category_id,
+                    'coop_id'         => $request->coop_id,
+                ]);
+
+                // Relasi many-to-many
+                if ($request->colors) {
+                    $product->colors()->sync($request->colors);
+                }
+                if ($request->sizes) {
+                    $product->sizes()->sync($request->sizes);
+                }
+
+
+
+                // Upload foto (jika ada) dan simpan ke relasi
+                Log::info('Uploading photos.');
+
+                if ($request->hasFile('photos')) {
+                    Log::info('Uploading photos.');
+                    foreach ($request->file('photos') as $file) {
+                        $path = $file->store('product_photos', 'public');
+                        if (!$path) {
+                            Log::error('Failed to upload photo.');
+                            throw new \Exception('Failed to upload photo.');
+                        }
+                        Log::info('Uploaded photo to: ' . $path);
+                        // Simpan ke tabel product_photos
+                        $photo = $product->photos()->create(['photo_path' => $path]);
+                        if (!$photo) {
+                            Log::error('Failed to save photo to database.');
+                            throw new \Exception('Failed to save photo to database.');
+                        }
+                        Log::info('Saved photo to database: ' . $path);
+                    }
+                } else {
+                    Log::info('No photos to upload.');
+                }
+
+                return $product;
+            });
+
+            Log::info('Product Created:', ['Product ID' => $product->id]);
+
+            return response()->json([
+                'status'  => 'success',
+                'message' => 'Product created successfully',
+                'data'    => $product
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            // Jika validasi gagal, kembalikan JSON 422
+            $errors = $e->errors();
+            Log::warning('Validation error: ', $errors);
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Validation error',
+                'errors'  => $errors
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Error creating product: ' . $e->getMessage());
+
+            // Jika error selain validasi
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Terjadi kesalahan saat menyimpan produk: ' . $e->getMessage()
+            ], 500);
         }
-
-        // Simpan ke DB
-        $product = Product::create([
-            'product_name'      => $request->product_name,
-            'cost_price'        => $request->cost_price,
-            'wholesale_price'   => $request->wholesale_price,
-            'sale_price'        => $request->sale_price,
-            'supplier_id'       => $request->supplier_id,
-            'item_code'         => $itemCode,
-            'stock'             => $request->stock,
-            'brand_id'          => $request->brand_id,
-            'category_id'       => $request->category_id,
-            'coop_id'           => $request->coop_id,
-        ]);
-
-        // Relasi many-to-many
-        if ($request->colors) {
-            $product->colors()->sync($request->colors);
-        }
-        if ($request->sizes) {
-            $product->sizes()->sync($request->sizes);
-        }
-
-        // Upload foto (jika ada)
-        if ($request->hasFile('photos')) {
-            foreach ($request->file('photos') as $file) {
-                $path = $file->store('product_photos', 'public');
-                // Simpan ke tabel product_photos (jika ada)
-                $product->photos()->create(['photo_path' => $path]);
-            }
-        }
-
-        Log::info('Product Created:', ['Product ID' => $product->id]);
-
-        // Return JSON (bisa juga return status 200)
-        return response()->json([
-            'status'  => 'success',
-            'message' => 'Product created',
-            'data'    => $product
-        ]);
     }
 
     /**
@@ -229,7 +381,7 @@ class ProductController extends Controller
     /**
      * Update the specified resource in storage.
      */
-    public function update(Request $request, string $id)
+    public function update1(Request $request, string $id)
     {
         Log::info('Update Product Request:', $request->all());
 
@@ -317,6 +469,146 @@ class ProductController extends Controller
             'data'    => $product
         ]);
     }
+
+
+    public function update(Request $request, string $id)
+    {
+        // Mulai output buffering untuk mencegah output tambahan
+        ob_start();
+
+        // Log data request untuk debugging
+        Log::info('Update Product Request:', $request->all());
+
+        try {
+            Log::info('Validating request data.');
+
+            // Validasi input
+            $request->validate([
+                'product_name'    => 'required|string|max:255',
+                'cost_price'      => 'required|numeric',
+                'wholesale_price' => 'required|numeric',
+                'sale_price'      => 'required|numeric',
+                'supplier_id'     => 'required|exists:suppliers,id',
+                'colors'          => 'array',
+                'sizes'           => 'array',
+                'photos'          => 'array',
+                'photos.*'        => 'image|mimes:jpeg,png,jpg,gif,svg|max:10240', // Max 10MB
+                'stock'           => 'required|integer|min:0',
+                'brand_id'        => 'required|exists:brands,id',
+                'category_id'     => 'required|exists:categories,id',
+                'coop_id'         => 'required|exists:coops,id',
+                'removed_photos'  => 'array', // Jika ingin memvalidasi
+                'removed_photos.*' => 'integer|exists:product_photos,id',
+            ]);
+
+            // Temukan produk
+            Log::info('Finding product with ID: ' . $id);
+            $product = Product::with(['colors', 'sizes', 'photos'])->findOrFail($id);
+
+            // Update field (TANPA mengubah item_code)
+            Log::info('Updating product fields.');
+            $product->update([
+                'product_name'    => $request->product_name,
+                'cost_price'      => $request->cost_price,
+                'wholesale_price' => $request->wholesale_price,
+                'sale_price'      => $request->sale_price,
+                'supplier_id'     => $request->supplier_id,
+                'stock'           => $request->stock,
+                'brand_id'        => $request->brand_id,
+                'category_id'     => $request->category_id,
+                'coop_id'         => $request->coop_id,
+                // 'item_code' tidak diubah
+            ]);
+
+            // Sync many-to-many relationships
+            Log::info('Syncing colors and sizes.');
+            $product->colors()->sync($request->colors ?: []);
+            $product->sizes()->sync($request->sizes ?: []);
+
+            // Hapus foto lama yang dipilih untuk dihapus
+            if ($request->removed_photos) {
+                Log::info('Removing old photos.');
+                $photosToRemove = $product->photos()->whereIn('id', $request->removed_photos)->get();
+
+                foreach ($photosToRemove as $photo) {
+                    // Hapus file fisik di storage
+                    if (Storage::exists('public/' . $photo->photo_path)) {
+                        Storage::delete('public/' . $photo->photo_path);
+                        Log::info('Deleted photo file: ' . $photo->photo_path);
+                    } else {
+                        Log::warning('Photo file not found: ' . $photo->photo_path);
+                    }
+
+                    // Hapus record di database
+                    $photo->delete();
+                    Log::info('Deleted photo record with ID: ' . $photo->id);
+                }
+            }
+
+            // Upload foto baru (jika ada)
+            if ($request->hasFile('photos')) {
+                Log::info('Uploading new photos.');
+                foreach ($request->file('photos') as $file) {
+                    $path = $file->store('product_photos', 'public');
+                    if (!$path) {
+                        Log::error('Failed to upload photo.');
+                        throw new \Exception('Failed to upload photo.');
+                    }
+                    Log::info('Uploaded photo to: ' . $path);
+
+                    // Simpan ke tabel product_photos
+                    $photo = $product->photos()->create(['photo_path' => $path]);
+                    if (!$photo) {
+                        Log::error('Failed to save photo to database.');
+                        throw new \Exception('Failed to save photo to database.');
+                    }
+                    Log::info('Saved photo to database: ' . $path);
+                }
+            } else {
+                Log::info('No new photos to upload.');
+            }
+
+            Log::info('Product Updated:', ['Product ID' => $product->id]);
+
+            // Bersihkan buffer
+            ob_end_clean();
+
+            // Return JSON
+            return response()->json([
+                'status'  => 'success',
+                'message' => 'Product updated successfully!',
+                'data'    => $product
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            // Bersihkan buffer jika ada
+            if (ob_get_length()) {
+                ob_end_clean();
+            }
+
+            // Jika validasi gagal, kembalikan JSON 422
+            $errors = $e->errors();
+            Log::warning('Validation error: ', $errors);
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Validation error',
+                'errors'  => $errors
+            ], 422);
+        } catch (\Exception $e) {
+            // Bersihkan buffer jika ada
+            if (ob_get_length()) {
+                ob_end_clean();
+            }
+
+            Log::error('Error updating product: ' . $e->getMessage());
+
+            // Jika error selain validasi
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Terjadi kesalahan saat mengupdate produk: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
 
     /**
      * Remove the specified resource from storage.

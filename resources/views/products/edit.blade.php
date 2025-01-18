@@ -1,3 +1,5 @@
+{{-- views/products/edit.blade.php --}}
+
 <x-app-layout>
     <div class="max-w-7xl mx-auto px-4 py-6">
         {{-- Pastikan Anda juga menaruh CSS Select2 di HEAD layout:
@@ -799,30 +801,153 @@
             }
 
         // 7) Submit Form Product (AJAX) -- (contoh, sesuaikan controller)
-            const productForm = document.getElementById('update-form');
-            productForm.addEventListener('submit', function(e) {
+        //     const productForm = document.getElementById('update-form');
+        //     productForm.addEventListener('submit', function(e) {
+        //     e.preventDefault();
+
+        //     let fd = new FormData();
+
+        //    // 1) Tambah data lain
+        //     fd.append('_token', document.querySelector('input[name="_token"]').value);
+        //     fd.append('_method', 'PUT');
+
+        //     // CSRF
+        //     fd.append('_token', document.querySelector('input[name="_token"]').value);
+
+        //     // 2) Ambil semua input[name="removed_photos[]"] di form
+        //     const removedPhotoInputs = document.querySelectorAll('input[name="removed_photos[]"]');
+        //     removedPhotoInputs.forEach(input => {
+        //         fd.append('removed_photos[]', input.value);
+        //     });
+
+        //     // Hapus format Rupiah => hanya angka
+        //     const costVal      = costPriceInput.value.replace(/[^\d]/g, '');
+        //     const wholesaleVal = wholesalePriceInput.value.replace(/[^\d]/g, '');
+        //     const saleVal      = salePriceInput.value.replace(/[^\d]/g, '');
+
+        //     fd.append('product_name', document.getElementById('product_name').value);
+        //     fd.append('cost_price', costVal);
+        //     fd.append('wholesale_price', wholesaleVal);
+        //     fd.append('sale_price', saleVal);
+        //     fd.append('supplier_id', document.getElementById('supplier_id').value);
+        //     fd.append('coop_id', document.getElementById('coop_id').value);
+        //     fd.append('category_id', document.getElementById('category_id').value);
+        //     fd.append('brand_id', document.getElementById('brand_id').value);
+        //     fd.append('stock', document.getElementById('stock').value);
+
+
+        //     // Colors
+        //     const selectedColors = $('#colors').val() || [];
+        //     selectedColors.forEach(colorId => {
+        //         fd.append('colors[]', colorId);
+        //     });
+        //     // Sizes
+        //     const selectedSizes = $('#sizes').val() || [];
+        //     selectedSizes.forEach(sizeId => {
+        //         fd.append('sizes[]', sizeId);
+        //     });
+
+        //     // Photos
+        //     selectedFiles.forEach(file => {
+        //         fd.append('photos[]', file);
+        //     });
+
+        //     fetch('{{ route("products.update", $product->id) }}', {
+        //         method: 'POST', // atau 'PUT' tapi kebanyakan kita pakai POST + _method=PUT
+        //         body: fd,
+        //         headers: {
+        //             'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+        //         }
+        //     })
+        //     .then(res => {
+        //         if (!res.ok) {
+        //             return res.json().then(errData => {
+        //                 throw new Error(errData.message || 'Something went wrong');
+        //             });
+        //         }
+        //         return res.json();
+        //     })
+        //     .then(data => {
+        //         if (data.status === 'success') {
+        //             Swal.fire({
+        //                 icon: 'success',
+        //                 title: 'Success',
+        //                 text: data.message || 'Product updated!',
+        //             }).then(() => {
+        //                 // redirect ke index (atau tutup modal)
+        //                 window.location.href = "{{ route('products.index') }}";
+        //             });
+        //         } else {
+        //             Swal.fire({
+        //                 icon: 'error',
+        //                 title: 'Error',
+        //                 text: data.message || 'Failed to update product.',
+        //             });
+        //         }
+        //     })
+        //     .catch(err => {
+        //         console.error('Error:', err);
+        //         Swal.fire({
+        //             icon: 'error',
+        //             title: 'Error',
+        //             text: err.message || 'Terjadi kesalahan saat mengupdate product.',
+        //         });
+        //     });
+        // });
+
+
+        // Submit Form Product (AJAX)
+       // Submit Form Product (AJAX)
+    let isSubmittingUpdate = false;
+    const updateForm = document.getElementById('update-form');
+    if (updateForm) {
+        updateForm.addEventListener('submit', function(e) {
             e.preventDefault();
+
+            console.log("Form submitted for update"); // Logging
+
+            // Jika sudah di-submit, cegah submit ulang
+            if (isSubmittingUpdate) {
+                console.log("Already submitting, exiting.");
+                return;
+            }
+            isSubmittingUpdate = true;
+
+            // Disable tombol submit
+            const submitBtn = updateForm.querySelector('button[type="submit"]');
+            submitBtn.disabled = true;
+            submitBtn.innerText = 'Sedang mengupdate...';
 
             let fd = new FormData();
 
-           // 1) Tambah data lain
+            // CSRF dan Method Spoofing
             fd.append('_token', document.querySelector('input[name="_token"]').value);
             fd.append('_method', 'PUT');
-
-            // CSRF
-            fd.append('_token', document.querySelector('input[name="_token"]').value);
-
-            // 2) Ambil semua input[name="removed_photos[]"] di form
-            const removedPhotoInputs = document.querySelectorAll('input[name="removed_photos[]"]');
-            removedPhotoInputs.forEach(input => {
-                fd.append('removed_photos[]', input.value);
-            });
 
             // Hapus format Rupiah => hanya angka
             const costVal      = costPriceInput.value.replace(/[^\d]/g, '');
             const wholesaleVal = wholesalePriceInput.value.replace(/[^\d]/g, '');
             const saleVal      = salePriceInput.value.replace(/[^\d]/g, '');
 
+            // Tambahkan logging untuk memastikan nilai yang dikirim
+            console.log('costVal:', costVal);
+            console.log('wholesaleVal:', wholesaleVal);
+            console.log('saleVal:', saleVal);
+
+            // Validasi di Frontend: Pastikan nilai tidak kosong
+            if (!costVal || !wholesaleVal || !saleVal) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error',
+                    text: 'Harga tidak boleh kosong atau invalid.',
+                });
+                isSubmittingUpdate = false;
+                submitBtn.disabled = false;
+                submitBtn.innerText = 'Simpan Produk';
+                return;
+            }
+
+            // Tambah field yang diperlukan
             fd.append('product_name', document.getElementById('product_name').value);
             fd.append('cost_price', costVal);
             fd.append('wholesale_price', wholesaleVal);
@@ -833,35 +958,48 @@
             fd.append('brand_id', document.getElementById('brand_id').value);
             fd.append('stock', document.getElementById('stock').value);
 
-
             // Colors
             const selectedColors = $('#colors').val() || [];
             selectedColors.forEach(colorId => {
                 fd.append('colors[]', colorId);
             });
+
             // Sizes
             const selectedSizes = $('#sizes').val() || [];
             selectedSizes.forEach(sizeId => {
                 fd.append('sizes[]', sizeId);
             });
 
-            // Photos
+            // Photos (foto baru)
             selectedFiles.forEach(file => {
                 fd.append('photos[]', file);
             });
 
+            // Removed Photos (foto lama yang dihapus)
+            const removedPhotoInputs = document.querySelectorAll('input[name="removed_photos[]"]');
+            removedPhotoInputs.forEach(input => {
+                fd.append('removed_photos[]', input.value);
+            });
+
             fetch('{{ route("products.update", $product->id) }}', {
-                method: 'POST', // atau 'PUT' tapi kebanyakan kita pakai POST + _method=PUT
+                method: 'POST', // Menggunakan POST dengan method spoofing
                 body: fd,
                 headers: {
+                    'Accept': 'application/json', // Penting untuk mendapatkan respon JSON
+                    'X-Requested-With': 'XMLHttpRequest', // Menandakan ini adalah request AJAX
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
                 }
             })
-            .then(res => {
+            .then(async (res) => {
                 if (!res.ok) {
-                    return res.json().then(errData => {
-                        throw new Error(errData.message || 'Something went wrong');
-                    });
+                    const contentType = res.headers.get("content-type") || "";
+                    if (contentType.includes("application/json")) {
+                        const errorData = await res.json();
+                        throw new Error(errorData.message || 'Terjadi kesalahan (JSON)');
+                    } else {
+                        const errorText = await res.text();
+                        throw new Error('Terjadi kesalahan. Server mengirimkan non-JSON response');
+                    }
                 }
                 return res.json();
             })
@@ -870,9 +1008,9 @@
                     Swal.fire({
                         icon: 'success',
                         title: 'Success',
-                        text: data.message || 'Product updated!',
+                        text: data.message || 'Product has been updated.',
+                        showConfirmButton: true
                     }).then(() => {
-                        // redirect ke index (atau tutup modal)
                         window.location.href = "{{ route('products.index') }}";
                     });
                 } else {
@@ -888,9 +1026,15 @@
                 Swal.fire({
                     icon: 'error',
                     title: 'Error',
-                    text: err.message || 'Terjadi kesalahan saat mengupdate product.',
+                    text: err.message || 'Terjadi kesalahan saat mengupdate produk.',
                 });
+            })
+            .finally(() => {
+                isSubmittingUpdate = false;
+                submitBtn.disabled = false;
+                submitBtn.innerText = 'Simpan Produk';
             });
         });
+    }
     </script>
 </x-app-layout>

@@ -1,7 +1,8 @@
+
+{{-- resource/views/product/create.blade.php --}}
 <x-app-layout>
     <div class="max-w-7xl mx-auto px-4 py-6">
-        {{-- Pastikan Anda juga menaruh CSS Select2 di HEAD layout:
-        <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" /> --}}
+
 
         {{-- Buat style agar Select2 bersifat responsif --}}
         <style>
@@ -10,19 +11,6 @@
                 /* Agar Select2 full width */
             }
         </style>
-
-        {{--
-        coop + modal
-        product_name
-        category + modal
-        brand + modal
-        cost_price
-        wholesale_price
-        sale_price
-        color + modal
-        size + modal
-        spplier
-        stock --}}
 
         <div class="bg-white rounded-lg shadow p-6">
             {{-- FORM UTAMA --}}
@@ -712,9 +700,27 @@
         });
    
         // Submit Form Product (AJAX) -- (contoh, sesuaikan controller)
+        // Contoh: menonaktifkan tombol setelah submit agar user tidak klik berkali-kali
+        let isSubmitting = false;
+        const formAddProduct = document.getElementById('form-add-product');
         const productForm = document.getElementById('product-form');
         productForm.addEventListener('submit', function(e) {
             e.preventDefault();
+            
+            console.log("Form submitted"); // Logging
+
+            // Jika sudah di-submit, cegah submit ulang
+            if (isSubmitting) {
+                console.log("Already submitting, exiting.");
+                return;
+            }
+            isSubmitting = true;
+
+            // Disable tombol submit
+            const submitBtn = productForm.querySelector('button[type="submit"]');
+            submitBtn.disabled = true;
+            submitBtn.innerText = 'Sedang menyimpan...';
+
             let fd = new FormData();
 
             // CSRF
@@ -755,35 +761,34 @@
                 method: 'POST',
                 body: fd,
                 headers: {
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                    'Accept': 'application/json', // Penting untuk mendapatkan respon JSON
+                    'X-Requested-With': 'XMLHttpRequest' // Menandakan ini adalah request AJAX
                 }
             })
-            .then(res => {
-                // Jika server mengembalikan status != 200, kita bisa lempar error
+            .then(async (res) => {
                 if (!res.ok) {
-                    // misal 422 (validasi) atau 500 (server error)
-                    return res.json().then(errData => { 
-                        throw new Error(errData.message || 'Something went wrong');
-                    });
+                    const contentType = res.headers.get("content-type") || "";
+                    if (contentType.includes("application/json")) {
+                        const errorData = await res.json();
+                        throw new Error(errorData.message || 'Terjadi kesalahan (JSON)');
+                    } else {
+                        const errorText = await res.text();
+                        throw new Error('Terjadi kesalahan. Server mengirimkan non-JSON response');
+                    }
                 }
-                return res.json(); // parse JSON
+                return res.json();
             })
             .then(data => {
-                console.log('Success:', data);
-
                 if (data.status === 'success') {
-                    // Tampilkan SweetAlert sukses
                     Swal.fire({
                         icon: 'success',
                         title: 'Success',
                         text: data.message || 'Product has been created.',
                         showConfirmButton: true
                     }).then(() => {
-                        // Setelah user klik OK, kita redirect
                         window.location.href = "{{ route('products.index') }}";
                     });
                 } else {
-                    // Jika server mengembalikan status error
                     Swal.fire({
                         icon: 'error',
                         title: 'Error',
@@ -792,24 +797,17 @@
                 }
             })
             .catch(err => {
-            if (err.message === 'Isi dulu awalan kode item pada menu setting.') {
-                Swal.fire({
-                    icon: 'warning',
-                    title: 'Warning',
-                    text: err.message,
-                    confirmButtonText: 'OK'
-                });
-            } else {
                 Swal.fire({
                     icon: 'error',
                     title: 'Error',
-                    text: err.message || 'Terjadi kesalahan saat menyimpan product.',
+                    text: err.message || 'Terjadi kesalahan saat menyimpan produk.',
                 });
-            }
+            })
+            .finally(() => {
+                isSubmitting = false;
+                submitBtn.disabled = false;
+                submitBtn.innerText = 'Simpan Produk';
             });
-
-            
         });
-
     </script>
 </x-app-layout>
